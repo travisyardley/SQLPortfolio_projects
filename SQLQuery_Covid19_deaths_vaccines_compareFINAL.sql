@@ -1,6 +1,7 @@
 /*
 A data exploration on Covid 19 vaccine efficacy
-Data set source: https://ourworldindata.org/covid-deaths
+Data set sourced 01/07/2022: https://ourworldindata.org/covid-deaths
+Dashboard: https://public.tableau.com/app/profile/travis.yardley/viz/Covid19Deathsandvaccinesvisualization/Dashboard1?publish=yes
 Skills used: Joins, common table expressions, temp tables, Windows functions,
 aggregate functions, creating views, converting data types
 */
