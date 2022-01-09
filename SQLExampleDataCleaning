@@ -1,0 +1,182 @@
+/*
+EXAMPLE DATA CLEANING IN SQL
+Highlights a variety of methods used to clean and organize data in a table for exploration.
+Data set sourced 01/07/2022: https://github.com/AlexTheAnalyst/PortfolioProjects/blob/main/Nashville%20Housing%20Data%20for%20Data%20Cleaning.xlsx
+Skills used: Alter/ update table, substrings, adding & dropping columns, convert data format,
+self joins, filtering data, ISNULL data population, substrings, CHARINDEX,
+PARSENAME, REPLACE, CASE statements, common table expressions, Windows functions
+PARTITION BY
+*/
+
+--[DATA SET TEST QUERY.]
+--[Selects table relating to Nashville Housing Data.]
+SELECT *
+FROM HousingData_Nashville.dbo.NashvilleHousing
+
+--[STANDARDIZE DATE FORMAT.]
+--[Removing unnesessary DateTime formatting from data.]
+--[SKILLS: Alter table, adding columns, convert data format.]
+SELECT SaleDate, CONVERT (Date,SaleDate) AS DateOfSale
+FROM HousingData_Nashville.dbo.NashvilleHousing
+
+--[Modifying the table to include the newly formatted sale dat information.]
+ALTER TABLE NashvilleHousing
+ADD DateOfSale Date;
+GO
+UPDATE NashvilleHousing
+SET DateOfSale = CONVERT (Date,SaleDate)
+
+--[Creates new column.]
+ALTER TABLE NashvilleHousing
+ADD SaleDateCorrected Date;
+
+--[Populates new column.]
+UPDATE NashvilleHousing
+SET SaleDateCorrected = CONVERT (Date,SaleDate)
+
+--[POPULATE PROPERTY ADDRESS DATA.]
+--[SKILLS: Self joins, filtering data for values, ISNULL.]
+--[Checking for null values.]
+SELECT *
+FROM HousingData_Nashville.dbo.NashvilleHousing
+WHERE PropertyAddress is null
+
+--[Looking for correlated data to populate addresses. Lines 44 & 45
+--  confirm ParcelID is tied to PropertyAddress.]
+SELECT *
+FROM HousingData_Nashville.dbo.NashvilleHousing
+ORDER BY ParcelID
+
+--[Uses self join and primary keys to determine where PropertyAddress does not match an appropriate ParcelID.]
+--[This query is also used to confirm the below query was successful.]
+SELECT orig.ParcelID, orig.PropertyAddress, matched.ParcelID AS Matched_ParcelID, matched.PropertyAddress AS Matched_PropertyAddresss, ISNULL(orig.PropertyAddress,matched.PropertyAddress) AS AddressCorrection
+FROM HousingData_Nashville.dbo.NashvilleHousing orig
+JOIN HousingData_Nashville.dbo.NashvilleHousing matched
+  ON orig.ParcelID = matched.ParcelID
+  AND orig.[UniqueID] <> matched.[UniqueID]
+WHERE orig.PropertyAddress is null
+
+--[Uses ISNULL to insert data into a column.]
+UPDATE orig
+SET PropertyAddress = ISNULL(orig.PropertyAddress,matched.PropertyAddress)
+FROM HousingData_Nashville.dbo.NashvilleHousing orig
+JOIN HousingData_Nashville.dbo.NashvilleHousing matched
+  ON orig.ParcelID = matched.ParcelID
+  AND orig.[UniqueID] <> matched.[UniqueID]
+WHERE orig.PropertyAddress is null
+
+--[SPLITTING ADDRESS INTO INDIVIDUAL COLUMNS.]
+--[SKILLS:substrings, charindex, dropping columns from a table]
+--[Using substrings and character indexing to search for delimmiters in order to split a single column.]
+SELECT
+  SUBSTRING (PropertyAddress, 1, CHARINDEX(',' , PropertyAddress) -1) AS StreetAddress ,
+  SUBSTRING (PropertyAddress, CHARINDEX(',' , PropertyAddress) +1, LEN(PropertyAddress)) AS CityAddress
+FROM HousingData_Nashville.dbo.NashvilleHousing
+
+--[Creating and populating  two new columns with the delimitted data from a single column.]
+ALTER TABLE NashvilleHousing
+ADD StreetAddress nvarchar(255);
+GO
+UPDATE NashvilleHousing
+SET StreetAddress = SUBSTRING (PropertyAddress, 1, CHARINDEX(',' , PropertyAddress) -1)
+
+--[While working on this I accidentally added the StreetAddress column too early, so I had to get rid of it.]
+ALTER TABLE dbo.NashvilleHousing DROP COLUMN StreetAddress;
+
+ALTER TABLE NashvilleHousing
+ADD CityAddress nvarchar(255);
+GO
+UPDATE NashvilleHousing
+SET CityAddress = SUBSTRING (PropertyAddress, CHARINDEX(',' , PropertyAddress) +1, LEN(PropertyAddress))
+
+--[Using PARSENAME and REPLACE to break out multiple comma delimited data points from a single column.]
+SELECT
+PARSENAME (REPLACE(OwnerAddress, ',','.'), 3) AS OwnerAddressStreet,
+PARSENAME (REPLACE(OwnerAddress, ',','.'), 2) AS OwnerAddressCity,
+PARSENAME (REPLACE(OwnerAddress, ',','.'), 1) AS OwnerAddressState
+FROM HousingData_Nashville.dbo.NashvilleHousing
+
+ALTER TABLE NashvilleHousing
+ADD OwnerAddressStreet nvarchar(255);
+GO
+UPDATE NashvilleHousing
+SET OwnerAddressStreet = PARSENAME (REPLACE(OwnerAddress, ',','.'), 3)
+
+ALTER TABLE NashvilleHousing
+ADD OwnerAddressCity nvarchar(255);
+GO
+UPDATE NashvilleHousing
+SET OwnerAddressCity = PARSENAME (REPLACE(OwnerAddress, ',','.'), 2)
+
+ALTER TABLE NashvilleHousing
+ADD OwnerAddressState nvarchar(255);
+GO
+UPDATE NashvilleHousing
+SET OwnerAddressState = PARSENAME (REPLACE(OwnerAddress, ',','.'), 1)
+
+--[Checking and correcting a column for value consistancy.]
+--[SKILLS: CASE statements
+--[This query returns four distinct values, but really only represents a binary value.]
+--[This query is also used to confirm that the table was edited successfully.]
+SELECT DISTINCT (SoldAsVacant), COUNT(SoldAsVacant) AS Instances
+FROM HousingData_Nashville.dbo.NashvilleHousing
+GROUP BY SoldAsVacant
+ORDER BY 2 DESC
+
+--[Replaces rows with consistant values.]
+SELECT SoldAsVacant,
+  CASE WHEN SoldAsVacant = 'Y' THEN 'Yes'
+       WHEN SoldAsVacant = 'N' THEN 'No'
+       ELSE SoldAsVacant
+       END
+  AS Corrected
+FROM HousingData_Nashville.dbo.NashvilleHousing
+
+--[Updates the table with the new, consistant values.]
+UPDATE NashvilleHousing
+SET SoldAsVacant = CASE WHEN SoldAsVacant = 'Y' THEN 'Yes'
+       WHEN SoldAsVacant = 'N' THEN 'No'
+       ELSE SoldAsVacant
+       END
+
+--[SEARCHING FOR AND REMOVING DUPLICATE ROWS IN A TABLE]
+--[SKILLS: PARTITION BY, CTE, Windows functions]
+--[Looking for duplicate entries.]
+WITH RowNumCTE AS (
+SELECT *,
+  ROW_NUMBER() OVER (
+  PARTITION BY ParcelID,
+			   PropertyAddress,
+			   SalePrice,
+			   SaleDate,
+			   LegalReference
+			   ORDER BY UniqueID
+			   ) row_num
+
+FROM HousingData_Nashville.dbo.NashvilleHousing
+)
+SELECT *
+FROM RowNumCTE
+WHERE row_num > 1
+
+--[Deleting duplicate entries.]
+WITH RowNumCTE AS (
+SELECT *,
+  ROW_NUMBER() OVER (
+  PARTITION BY ParcelID,
+			   PropertyAddress,
+			   SalePrice,
+			   SaleDate,
+			   LegalReference
+			   ORDER BY UniqueID
+			   ) row_num
+
+FROM HousingData_Nashville.dbo.NashvilleHousing
+)
+DELETE
+FROM RowNumCTE
+WHERE row_num > 1
+
+--[REMOVING UNUSED COLUMNS IN A TABLE]
+ALTER TABLE HousingData_Nashville.dbo.NashvilleHousing
+DROP COLUMN  OwnerAddress, TaxDistrict, PropertyAddress, SaleDate
